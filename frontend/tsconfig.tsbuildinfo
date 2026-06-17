@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/api.ts","./src/auth.tsx","./src/main.tsx","./src/owner.tsx","./src/types.ts","./src/components/alertitem.tsx","./src/components/clientrow.tsx","./src/components/kpi.tsx","./src/components/layout.tsx","./src/lib/format.ts","./src/pages/cockpit.tsx","./src/pages/login.tsx","./src/pages/placeholder.tsx"],"errors":true,"version":"5.9.3"}

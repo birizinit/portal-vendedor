@@ -1,0 +1,31 @@
+# ===== Segredos (NUNCA commitar) =====
+.env
+backend/.env
+*.local.env
+
+# ===== Python =====
+**/__pycache__/
+*.py[cod]
+backend/.venv/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# ===== Banco / dados sincronizados =====
+backend/data/
+*.db
+*.db-shm
+*.db-wal
+ploomes_fields.json
+
+# ===== Node / build do front =====
+frontend/node_modules/
+frontend/dist/
+npm-debug.log*
+
+# ===== Logs / OS / editor =====
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,13 @@
+**/node_modules
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+.git
+.gitignore
+backend/.env
+backend/data
+frontend/dist
+*.log
+README.md
+Iniciar Portal.bat
