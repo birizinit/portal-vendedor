@@ -150,6 +150,24 @@ def create_seller(body: SellerIn, db: Session = Depends(get_session),
     return _seller_out(u).model_dump()
 
 
+class PasswordIn(BaseModel):
+    password: str
+
+
+@app.post("/api/admin/sellers/{seller_id}/password")
+def set_seller_password(seller_id: int, body: PasswordIn,
+                        db: Session = Depends(get_session),
+                        _: models.Seller = Depends(require_admin)) -> dict:
+    u = db.get(models.Seller, seller_id)
+    if u is None:
+        raise HTTPException(404, "Usuário não encontrado")
+    if len((body.password or "").strip()) < 4:
+        raise HTTPException(422, "A senha precisa ter ao menos 4 caracteres")
+    u.password_hash = hash_password(body.password.strip())
+    db.commit()
+    return {"ok": True, "id": u.id}
+
+
 # ===========================================================================
 # SYNC
 # ===========================================================================

@@ -40,10 +40,6 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const tok = getToken();
   if (tok) headers["Authorization"] = `Bearer ${tok}`;
   const res = await fetch(path, { ...opts, headers });
-  if (res.status === 401) {
-    clearToken();
-    throw new ApiError(401, "Sessão expirada");
-  }
   if (!res.ok) {
     let msg = `Erro ${res.status}`;
     try {
@@ -51,6 +47,13 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
       msg = body.detail || msg;
     } catch {
       /* ignore */
+    }
+    // 401 só significa "sessão expirada" quando havia um token (sessão real).
+    // Num login com senha errada, mostramos a mensagem real do servidor.
+    if (res.status === 401) {
+      const hadToken = !!getToken();
+      if (hadToken) clearToken();
+      throw new ApiError(401, hadToken && msg.startsWith("Erro") ? "Sessão expirada" : msg);
     }
     throw new ApiError(res.status, msg);
   }
@@ -123,6 +126,11 @@ export const api = {
     ploomes_owner_id?: number | null;
     role: string;
   }) => req<User>("/api/admin/sellers", { method: "POST", body: JSON.stringify(body) }),
+  adminSetPassword: (sellerId: number, password: string) =>
+    req<{ ok: boolean }>(`/api/admin/sellers/${sellerId}/password`, {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    }),
   reactivation: (
     ownerId: number | null,
     opts: { bucket?: string; offset?: number; limit?: number } = {}

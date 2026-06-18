@@ -70,6 +70,17 @@ export default function Admin() {
     }
   }
 
+  async function resetPassword(u: User) {
+    const np = window.prompt(`Nova senha para ${u.name} (${u.email}):`);
+    if (!np) return;
+    try {
+      await api.adminSetPassword(u.id, np);
+      setMsg(`Senha de ${u.name} alterada ✓`);
+    } catch (e: any) {
+      setMsg(e.message || "Erro ao alterar senha");
+    }
+  }
+
   const ploomesName = (id: number | null) =>
     id ? ploomes.find((p) => p.id === id)?.name || `#${id}` : "—";
 
@@ -185,6 +196,7 @@ export default function Admin() {
                     <th className="px-3 py-3 font-semibold">E-mail</th>
                     <th className="px-3 py-3 font-semibold">Perfil</th>
                     <th className="px-3 py-3 font-semibold">Vendedor (Ploomes)</th>
+                    <th className="px-3 py-3 font-semibold"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -204,6 +216,15 @@ export default function Admin() {
                         </span>
                       </td>
                       <td className="px-3 py-2.5 text-slate-500">{ploomesName(u.owner_id)}</td>
+                      <td className="px-3 py-2.5 text-right">
+                        <button
+                          onClick={() => resetPassword(u)}
+                          className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                          title="Redefinir senha"
+                        >
+                          🔑 Senha
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
