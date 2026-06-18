@@ -118,7 +118,7 @@ class SellerIn(BaseModel):
     name: str
     email: str
     password: str
-    ploomes_owner_id: int
+    ploomes_owner_id: Optional[int] = None
     role: str = "seller"
 
 
@@ -132,12 +132,18 @@ def list_sellers(db: Session = Depends(get_session),
 @app.post("/api/admin/sellers")
 def create_seller(body: SellerIn, db: Session = Depends(get_session),
                   _: models.Seller = Depends(require_admin)) -> dict:
+    role = body.role if body.role in ("seller", "admin") else "seller"
+    if role == "seller" and not body.ploomes_owner_id:
+        raise HTTPException(400, "Vendedor precisa estar vinculado a um vendedor do Ploomes")
     if db.query(models.Seller).filter(
             func.lower(models.Seller.email) == body.email.lower()).first():
         raise HTTPException(409, "E-mail já cadastrado")
+    owner = int(body.ploomes_owner_id) if (role == "seller" and body.ploomes_owner_id) else None
+    if owner is not None and db.query(models.Seller).filter_by(ploomes_owner_id=owner).first():
+        raise HTTPException(409, "Já existe um usuário vinculado a esse vendedor do Ploomes")
     u = models.Seller(name=body.name, email=body.email.lower().strip(),
                       password_hash=hash_password(body.password),
-                      ploomes_owner_id=body.ploomes_owner_id, role=body.role)
+                      ploomes_owner_id=owner, role=role)
     db.add(u)
     db.commit()
     db.refresh(u)
@@ -279,6 +285,140 @@ def contact_detail(contact_id: int, owner_id: Optional[int] = None,
                     "status_nota": qt.status_nota} for qt in quotes],
         "top_products": top_products,
     }
+
+
+_INTERACTION_KINDS = {
+    "anotacao": "Anotação",
+    "ligacao": "Ligação",
+    "whatsapp": "WhatsApp",
+    "email": "E-mail",
+    "visita": "Visita/Reunião",
+}
+
+
+class InteractionIn(BaseModel):
+    kind: str = "anotacao"
+    content: str
+    title: Optional[str] = None
+    deal_id: Optional[int] = None   # se vier, anexa a interação ao card do deal
+
+
+class DealIn(BaseModel):
+    title: Optional[str] = None
+    amount: float = 0.0
+
+
+def _require_owned_contact(db: Session, contact_id: int, oid: int) -> models.Contact:
+    c = db.get(models.Contact, contact_id)
+    if c is None or c.owner_id != oid:
+        raise HTTPException(404, "Cliente não encontrado nesta carteira")
+    return c
+
+
+@app.get("/api/contact/{contact_id}/interactions")
+async def list_interactions(contact_id: int, owner_id: Optional[int] = None,
+                            user: models.Seller = Depends(current_user),
+                            db: Session = Depends(get_session)) -> dict:
+    oid = resolve_owner_id(user, owner_id)
+    _require_owned_contact(db, contact_id, oid)
+    pl = get_ploomes()
+    if pl is None:
+        raise HTTPException(503, "Ploomes não configurado")
+    rows = await pl.interactions_for_contact(contact_id)
+    items = [{"id": r.get("Id"), "date": r.get("Date"), "type_id": r.get("TypeId"),
+              "title": r.get("Title"), "content": r.get("Content")} for r in rows]
+    return {"contact_id": contact_id, "items": items}
+
+
+@app.post("/api/contact/{contact_id}/interactions", status_code=201)
+async def add_interaction(contact_id: int, body: InteractionIn,
+                          owner_id: Optional[int] = None,
+                          user: models.Seller = Depends(current_user),
+                          db: Session = Depends(get_session)) -> dict:
+    """Registra uma interação no cliente (escreve no Ploomes)."""
+    import datetime as _dt
+
+    oid = resolve_owner_id(user, owner_id)
+    _require_owned_contact(db, contact_id, oid)
+    content = (body.content or "").strip()
+    if not content:
+        raise HTTPException(422, "Escreva o conteúdo da interação")
+
+    pl = get_ploomes()
+    if pl is None:
+        raise HTTPException(503, "Ploomes não configurado")
+
+    kind_label = _INTERACTION_KINDS.get(body.kind, "Anotação")
+    # categoriza no texto (TypeId=1 = anotação, o mesmo que o CRM usa)
+    prefix = "" if body.kind == "anotacao" else f"[{kind_label}] "
+    title = (body.title or "").strip() or f"{kind_label} — {user.name}"
+    now = _dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S-03:00")
+    payload = {
+        "ContactId": contact_id, "TypeId": 1,
+        "Title": title[:200], "Content": f"{prefix}{content}",
+        "Date": now,
+    }
+    if body.deal_id:
+        payload["DealId"] = int(body.deal_id)
+    try:
+        created = await pl.create_interaction(payload)
+    except Exception as e:  # noqa: BLE001
+        log.exception("falha ao criar interação contato %s", contact_id)
+        raise HTTPException(502, f"Não foi possível registrar no Ploomes: {e}")
+    return {"ok": True, "id": created.get("Id"),
+            "registered_by": user.name, "kind": kind_label}
+
+
+_DEAL_STATUS = {1: "Aberto", 2: "Ganho", 3: "Perdido"}
+
+
+@app.get("/api/contact/{contact_id}/deals")
+async def contact_deals(contact_id: int, owner_id: Optional[int] = None,
+                        user: models.Seller = Depends(current_user),
+                        db: Session = Depends(get_session)) -> dict:
+    oid = resolve_owner_id(user, owner_id)
+    _require_owned_contact(db, contact_id, oid)
+    pl = get_ploomes()
+    if pl is None:
+        raise HTTPException(503, "Ploomes não configurado")
+    rows = await pl.deals_for_contact(contact_id)
+    items = []
+    for d in rows:
+        stage = (d.get("Stage") or {}).get("Name") if isinstance(d.get("Stage"), dict) else ""
+        items.append({"id": d.get("Id"), "title": d.get("Title") or "Negócio",
+                      "amount": float(d.get("Amount") or 0),
+                      "stage": stage or "—",
+                      "status": _DEAL_STATUS.get(d.get("StatusId"), "Aberto")})
+    return {"contact_id": contact_id, "items": items}
+
+
+@app.post("/api/contact/{contact_id}/deals", status_code=201)
+async def create_contact_deal(contact_id: int, body: DealIn,
+                              owner_id: Optional[int] = None,
+                              user: models.Seller = Depends(current_user),
+                              db: Session = Depends(get_session)) -> dict:
+    """Cria um negócio no funil 'Entradas e Prospecção' (escreve no Ploomes)."""
+    oid = resolve_owner_id(user, owner_id)
+    c = _require_owned_contact(db, contact_id, oid)
+    pl = get_ploomes()
+    if pl is None:
+        raise HTTPException(503, "Ploomes não configurado")
+
+    pid, stage_id = await pl.intake_stage(settings.intake_pipeline_name)
+    if stage_id is None:
+        raise HTTPException(502, f"Funil '{settings.intake_pipeline_name}' "
+                                 "ou seu estágio inicial não encontrado no Ploomes")
+    title = (body.title or "").strip() or f"{c.name} — {settings.intake_pipeline_name}"
+    payload = {
+        "Title": title[:200], "ContactId": contact_id, "OwnerId": oid,
+        "StageId": stage_id, "Amount": float(body.amount or 0),
+    }
+    try:
+        created = await pl.create_deal(payload)
+    except Exception as e:  # noqa: BLE001
+        log.exception("falha ao criar deal contato %s", contact_id)
+        raise HTTPException(502, f"Não foi possível criar o negócio no Ploomes: {e}")
+    return {"ok": True, "id": created.get("Id"), "stage_id": stage_id}
 
 
 @app.get("/api/alerts")

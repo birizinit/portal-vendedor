@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { useOwner } from "../owner";
-import type { AdminOverview } from "../types";
+import type { AdminOverview, PloomesUser, User } from "../types";
 import { money, moneyShort, num } from "../lib/format";
 import { EXPLAIN } from "../lib/explain";
 import Kpi from "../components/Kpi";
@@ -15,6 +15,19 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
+  // usuários do portal
+  const [users, setUsers] = useState<User[]>([]);
+  const [ploomes, setPloomes] = useState<PloomesUser[]>([]);
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    role: "seller",
+    ploomes_owner_id: "",
+  });
+  const [creating, setCreating] = useState(false);
+  const [msg, setMsg] = useState("");
+
   useEffect(() => {
     setLoading(true);
     api
@@ -22,7 +35,43 @@ export default function Admin() {
       .then(setData)
       .catch((e) => setErr(e.message))
       .finally(() => setLoading(false));
+    api.adminSellers().then((r) => setUsers(r.sellers)).catch(() => {});
+    api
+      .ploomesUsers()
+      .then((r) => setPloomes(r.users.filter((u) => u.name && !/desconsiderar/i.test(u.name))))
+      .catch(() => {});
   }, []);
+
+  async function createUser(e: React.FormEvent) {
+    e.preventDefault();
+    if (creating) return;
+    if (form.role === "seller" && !form.ploomes_owner_id) {
+      setMsg("Selecione o vendedor do Ploomes.");
+      return;
+    }
+    setCreating(true);
+    setMsg("");
+    try {
+      await api.createSeller({
+        name: form.name,
+        email: form.email,
+        password: form.password,
+        role: form.role,
+        ploomes_owner_id: form.ploomes_owner_id ? Number(form.ploomes_owner_id) : null,
+      });
+      setForm({ name: "", email: "", password: "", role: "seller", ploomes_owner_id: "" });
+      setMsg("Usuário criado ✓");
+      const r = await api.adminSellers();
+      setUsers(r.sellers);
+    } catch (e: any) {
+      setMsg(e.message || "Erro ao criar usuário");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  const ploomesName = (id: number | null) =>
+    id ? ploomes.find((p) => p.id === id)?.name || `#${id}` : "—";
 
   function openSeller(ownerId: number) {
     setOwnerId(ownerId);
@@ -118,6 +167,111 @@ export default function Admin() {
         <p className="mt-2 text-xs text-slate-400">
           "Em risco" = fora da frequência / inativos. Clique numa linha para abrir a carteira do vendedor.
         </p>
+
+        {/* ===== Usuários do portal ===== */}
+        <div className="mt-8">
+          <h2 className="text-lg font-bold text-slate-800">Usuários do portal</h2>
+          <p className="mb-3 text-sm text-slate-500">
+            Crie acessos e vincule cada vendedor ao seu cadastro no Ploomes.
+          </p>
+
+          <div className="grid gap-4 lg:grid-cols-5">
+            {/* lista */}
+            <div className="lg:col-span-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-400">
+                    <th className="px-4 py-3 font-semibold">Nome</th>
+                    <th className="px-3 py-3 font-semibold">E-mail</th>
+                    <th className="px-3 py-3 font-semibold">Perfil</th>
+                    <th className="px-3 py-3 font-semibold">Vendedor (Ploomes)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => (
+                    <tr key={u.id} className="border-b border-slate-100 last:border-0">
+                      <td className="px-4 py-2.5 font-medium text-slate-700">{u.name}</td>
+                      <td className="px-3 py-2.5 text-slate-500">{u.email}</td>
+                      <td className="px-3 py-2.5">
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                            u.role === "admin"
+                              ? "bg-brand-100 text-brand-700"
+                              : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          {u.role === "admin" ? "Admin" : "Vendedor"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-500">{ploomesName(u.owner_id)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* form */}
+            <form
+              onSubmit={createUser}
+              className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 lg:col-span-2"
+            >
+              <h3 className="font-bold text-slate-700">Novo usuário</h3>
+              <input
+                required
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="Nome"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-600"
+              />
+              <input
+                required
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                placeholder="E-mail (login)"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-600"
+              />
+              <input
+                required
+                type="password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                placeholder="Senha"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-600"
+              />
+              <select
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-600"
+              >
+                <option value="seller">Vendedor</option>
+                <option value="admin">Admin</option>
+              </select>
+              {form.role === "seller" && (
+                <select
+                  value={form.ploomes_owner_id}
+                  onChange={(e) => setForm({ ...form, ploomes_owner_id: e.target.value })}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-600"
+                >
+                  <option value="">Vincular ao vendedor do Ploomes…</option>
+                  {ploomes.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                type="submit"
+                disabled={creating}
+                className="w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                {creating ? "Criando…" : "Criar usuário"}
+              </button>
+              {msg && <p className="text-center text-xs font-medium text-slate-600">{msg}</p>}
+            </form>
+          </div>
+        </div>
       </div>
     </div>
   );

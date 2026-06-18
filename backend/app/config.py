@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     reactivation_factor: float = 1.3       # dias_sem_compra / frequência >= fator -> alerta
     stale_deal_days: int = 7               # negócio parado no estágio
 
+    # --- Escrita / funil de entrada ---
+    intake_pipeline_name: str = "Entradas e Prospecção"  # onde novos deals são criados
+
     @property
     def ploomes_configured(self) -> bool:
         return bool(self.ploomes_api_key.strip())

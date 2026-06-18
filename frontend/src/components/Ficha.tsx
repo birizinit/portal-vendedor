@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useOwner } from "../owner";
-import type { ContactDetail } from "../types";
+import type { ContactDetail, Deal, Interaction } from "../types";
 import { fmtDate, money, phoneLink } from "../lib/format";
 import { EXPLAIN } from "../lib/explain";
 import Hint from "./Hint";
@@ -11,6 +11,20 @@ const TONE: Record<string, string> = {
   warn: "bg-amber-50 text-amber-700 border-amber-200",
   bad: "bg-red-50 text-red-700 border-red-200",
   info: "bg-slate-50 text-slate-600 border-slate-200",
+};
+
+const KIND_OPTIONS = [
+  { k: "anotacao", label: "📝 Anotação" },
+  { k: "ligacao", label: "📞 Ligação" },
+  { k: "whatsapp", label: "💬 WhatsApp" },
+  { k: "email", label: "✉️ E-mail" },
+  { k: "visita", label: "🤝 Visita/Reunião" },
+];
+
+const DEAL_STATUS: Record<string, string> = {
+  Aberto: "bg-amber-100 text-amber-700",
+  Ganho: "bg-emerald-100 text-emerald-700",
+  Perdido: "bg-red-100 text-red-700",
 };
 
 export default function Ficha({
@@ -25,6 +39,19 @@ export default function Ficha({
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState<number | null>(null);
 
+  // interações + negócios (ao vivo do Ploomes)
+  const [interactions, setInteractions] = useState<Interaction[]>([]);
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [iKind, setIKind] = useState("anotacao");
+  const [iText, setIText] = useState("");
+  const [iDeal, setIDeal] = useState<string>("");
+  const [savingI, setSavingI] = useState(false);
+  const [showDealForm, setShowDealForm] = useState(false);
+  const [dTitle, setDTitle] = useState("");
+  const [dAmount, setDAmount] = useState("");
+  const [savingD, setSavingD] = useState(false);
+  const [toast, setToast] = useState("");
+
   useEffect(() => {
     setLoading(true);
     api
@@ -37,6 +64,57 @@ export default function Ficha({
     navigator.clipboard?.writeText(text);
     setCopied(i);
     setTimeout(() => setCopied(null), 1500);
+  }
+
+  function flash(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(""), 2600);
+  }
+
+  useEffect(() => {
+    api.interactions(contactId, ownerId).then((r) => setInteractions(r.items)).catch(() => {});
+    api.contactDeals(contactId, ownerId).then((r) => setDeals(r.items)).catch(() => {});
+  }, [contactId, ownerId]);
+
+  async function saveInteraction() {
+    if (!iText.trim() || savingI) return;
+    setSavingI(true);
+    try {
+      await api.addInteraction(contactId, ownerId, {
+        kind: iKind,
+        content: iText.trim(),
+        deal_id: iDeal ? Number(iDeal) : undefined,
+      });
+      setIText("");
+      flash("Interação registrada no Ploomes ✓");
+      const r = await api.interactions(contactId, ownerId);
+      setInteractions(r.items);
+    } catch (e: any) {
+      flash(e.message || "Erro ao registrar");
+    } finally {
+      setSavingI(false);
+    }
+  }
+
+  async function createDeal() {
+    if (savingD) return;
+    setSavingD(true);
+    try {
+      await api.createDeal(contactId, ownerId, {
+        title: dTitle.trim() || undefined,
+        amount: dAmount ? Number(dAmount) : 0,
+      });
+      setDTitle("");
+      setDAmount("");
+      setShowDealForm(false);
+      flash("Negócio criado em Entradas e Prospecção ✓");
+      const r = await api.contactDeals(contactId, ownerId);
+      setDeals(r.items);
+    } catch (e: any) {
+      flash(e.message || "Erro ao criar negócio");
+    } finally {
+      setSavingD(false);
+    }
   }
 
   const c = d?.contact;
@@ -64,6 +142,12 @@ export default function Ficha({
             ✕
           </button>
         </div>
+
+        {toast && (
+          <div className="border-b border-emerald-200 bg-emerald-50 px-6 py-2 text-sm font-medium text-emerald-700">
+            {toast}
+          </div>
+        )}
 
         {loading || !d || !c ? (
           <div className="grid flex-1 place-items-center text-slate-400">Carregando ficha…</div>
@@ -106,6 +190,143 @@ export default function Ficha({
                 </div>
               </Section>
             )}
+
+            {/* negócios / funil */}
+            <Section title="🤝 Negócios (funil)">
+              <div className="space-y-2">
+                {deals.length === 0 && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-400">
+                    Nenhum negócio no funil.
+                  </div>
+                )}
+                {deals.map((dl) => (
+                  <div
+                    key={dl.id}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate font-medium text-slate-700">{dl.title}</div>
+                      <div className="text-xs text-slate-400">{dl.stage}</div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {dl.amount > 0 && (
+                        <span className="font-semibold text-slate-600">{money(dl.amount)}</span>
+                      )}
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                          DEAL_STATUS[dl.status] || "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {dl.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+
+                {!showDealForm ? (
+                  <button
+                    onClick={() => setShowDealForm(true)}
+                    className="w-full rounded-lg border border-dashed border-brand-300 px-3 py-2 text-sm font-semibold text-brand-700 hover:bg-brand-50"
+                  >
+                    + Criar negócio em “Entradas e Prospecção”
+                  </button>
+                ) : (
+                  <div className="space-y-2 rounded-lg border border-brand-200 bg-brand-50/40 p-3">
+                    <input
+                      value={dTitle}
+                      onChange={(e) => setDTitle(e.target.value)}
+                      placeholder={`Título (padrão: ${c.name})`}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-600"
+                    />
+                    <input
+                      value={dAmount}
+                      onChange={(e) => setDAmount(e.target.value.replace(/[^0-9.,]/g, ""))}
+                      placeholder="Valor estimado (opcional)"
+                      inputMode="decimal"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-600"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={createDeal}
+                        disabled={savingD}
+                        className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                      >
+                        {savingD ? "Criando…" : "Criar negócio"}
+                      </button>
+                      <button
+                        onClick={() => setShowDealForm(false)}
+                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Section>
+
+            {/* registrar interação */}
+            <Section title="📝 Registrar interação">
+              <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+                <div className="flex flex-wrap gap-2">
+                  <select
+                    value={iKind}
+                    onChange={(e) => setIKind(e.target.value)}
+                    className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-brand-600"
+                  >
+                    {KIND_OPTIONS.map((k) => (
+                      <option key={k.k} value={k.k}>
+                        {k.label}
+                      </option>
+                    ))}
+                  </select>
+                  {deals.length > 0 && (
+                    <select
+                      value={iDeal}
+                      onChange={(e) => setIDeal(e.target.value)}
+                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-brand-600"
+                    >
+                      <option value="">Sem vincular a negócio</option>
+                      {deals.map((dl) => (
+                        <option key={dl.id} value={dl.id}>
+                          No card: {dl.title.slice(0, 28)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <textarea
+                  value={iText}
+                  onChange={(e) => setIText(e.target.value)}
+                  placeholder="O que aconteceu? (ex.: liguei, cliente pediu prazo de 30 dias…)"
+                  rows={3}
+                  className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-600"
+                />
+                <button
+                  onClick={saveInteraction}
+                  disabled={savingI || !iText.trim()}
+                  className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+                >
+                  {savingI ? "Registrando…" : "Registrar no Ploomes"}
+                </button>
+              </div>
+
+              {interactions.length > 0 && (
+                <div className="mt-2 space-y-1.5">
+                  {interactions.map((it) => (
+                    <div
+                      key={it.id}
+                      className="rounded-lg border border-slate-100 bg-white px-3 py-2 text-sm"
+                    >
+                      <div className="text-[11px] text-slate-400">{fmtDate(it.date)}</div>
+                      <div className="whitespace-pre-wrap text-slate-700">
+                        {it.content || it.title || "—"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Section>
 
             {/* mensagens prontas */}
             <Section title="💬 Mensagens prontas">

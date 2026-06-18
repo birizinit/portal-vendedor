@@ -117,6 +117,22 @@ export interface Segment {
   count: number;
 }
 
+export interface Interaction {
+  id: number;
+  date: string;
+  type_id: number;
+  title: string | null;
+  content: string | null;
+}
+
+export interface Deal {
+  id: number;
+  title: string;
+  amount: number;
+  stage: string;
+  status: string;
+}
+
 // ---- Fase 4: Reativação ----
 export type RiskBucket = "overdue" | "inactive" | "cold";
 

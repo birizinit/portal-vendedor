@@ -3,6 +3,8 @@ import type {
   Cockpit,
   Contact,
   ContactDetail,
+  Deal,
+  Interaction,
   Opportunities,
   PloomesUser,
   Reactivation,
@@ -92,6 +94,35 @@ export const api = {
       `/api/sync?${ownerQS(ownerId)}`
     ),
   ploomesUsers: () => req<{ users: PloomesUser[] }>("/api/ploomes/users"),
+  // --- interações no cliente (escrita no Ploomes) ---
+  interactions: (id: number, ownerId: number | null) =>
+    req<{ items: Interaction[] }>(`/api/contact/${id}/interactions?${ownerQS(ownerId)}`),
+  addInteraction: (
+    id: number,
+    ownerId: number | null,
+    body: { kind: string; content: string; title?: string; deal_id?: number }
+  ) =>
+    req<{ ok: boolean; id: number; registered_by: string; kind: string }>(
+      `/api/contact/${id}/interactions?${ownerQS(ownerId)}`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
+  // --- negócios (deals) ---
+  contactDeals: (id: number, ownerId: number | null) =>
+    req<{ items: Deal[] }>(`/api/contact/${id}/deals?${ownerQS(ownerId)}`),
+  createDeal: (id: number, ownerId: number | null, body: { title?: string; amount?: number }) =>
+    req<{ ok: boolean; id: number; stage_id: number }>(
+      `/api/contact/${id}/deals?${ownerQS(ownerId)}`,
+      { method: "POST", body: JSON.stringify(body) }
+    ),
+  // --- admin: usuários do portal ---
+  adminSellers: () => req<{ sellers: User[] }>("/api/admin/sellers"),
+  createSeller: (body: {
+    name: string;
+    email: string;
+    password: string;
+    ploomes_owner_id?: number | null;
+    role: string;
+  }) => req<User>("/api/admin/sellers", { method: "POST", body: JSON.stringify(body) }),
   reactivation: (
     ownerId: number | null,
     opts: { bucket?: string; offset?: number; limit?: number } = {}
