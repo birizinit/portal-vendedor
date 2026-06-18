@@ -30,12 +30,23 @@ def _ensure_sqlite_dir(url: str) -> None:
         pass
 
 
-_ensure_sqlite_dir(settings.database_url)
+def _normalize_url(url: str) -> str:
+    """Aceita a DATABASE_URL padrão do Railway/Heroku (postgres:// e
+    postgresql://) e força o driver psycopg3 instalado."""
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url[len("postgresql://"):]
+    return url
 
-_connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+
+_DB_URL = _normalize_url(settings.database_url)
+_ensure_sqlite_dir(_DB_URL)
+
+_connect_args = {"check_same_thread": False} if _DB_URL.startswith("sqlite") else {}
 
 engine = create_engine(
-    settings.database_url,
+    _DB_URL,
     echo=False,
     pool_pre_ping=True,
     connect_args=_connect_args,
