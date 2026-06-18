@@ -8,11 +8,29 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import settings
+
+
+def _ensure_sqlite_dir(url: str) -> None:
+    """Garante que a pasta do arquivo SQLite exista (evita 'unable to open
+    database file' em deploy — Railway/Docker, volume montado, etc.)."""
+    if not url.startswith("sqlite"):
+        return
+    raw = url.split("///", 1)[-1]
+    if not raw or raw == ":memory:":
+        return
+    try:
+        Path(raw).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+
+
+_ensure_sqlite_dir(settings.database_url)
 
 _connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
 
