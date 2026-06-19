@@ -47,6 +47,7 @@ class Settings(BaseSettings):
 
     # --- Escrita / funil de entrada ---
     intake_pipeline_name: str = "Entradas e Prospecção"  # onde novos deals são criados
+    intake_source_id: int = 120001505                    # origem "Portal do Vendedor" (0 = não setar)
 
     @property
     def ploomes_configured(self) -> bool:

@@ -431,6 +431,8 @@ async def create_contact_deal(contact_id: int, body: DealIn,
         "Title": title[:200], "ContactId": contact_id, "OwnerId": oid,
         "StageId": stage_id, "Amount": float(body.amount or 0),
     }
+    if settings.intake_source_id:
+        payload["SourceId"] = settings.intake_source_id   # origem "Portal do Vendedor"
     try:
         created = await pl.create_deal(payload)
     except Exception as e:  # noqa: BLE001
