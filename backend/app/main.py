@@ -370,10 +370,13 @@ async def add_interaction(contact_id: int, body: InteractionIn,
     # categoriza no texto (TypeId=1 = anotação, o mesmo que o CRM usa)
     prefix = "" if body.kind == "anotacao" else f"[{kind_label}] "
     title = (body.title or "").strip() or f"{kind_label} — {user.name}"
+    # assinatura: como o CreatorId do Ploomes é sempre o usuário da chave de
+    # integração, carimbamos o vendedor que registrou direto no corpo.
+    signature = f"\n\n— Registrado por {user.name} (via Portal do Vendedor)"
     now = _dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S-03:00")
     payload = {
         "ContactId": contact_id, "TypeId": 1,
-        "Title": title[:200], "Content": f"{prefix}{content}",
+        "Title": title[:200], "Content": f"{prefix}{content}{signature}",
         "Date": now,
     }
     if body.deal_id:
