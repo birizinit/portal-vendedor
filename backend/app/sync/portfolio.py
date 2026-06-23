@@ -34,6 +34,19 @@ _QUOTE_STATUS_FK = "quote_FABBEA46-3B2C-4141-B5EC-EAF996F7BCC0"   # Status da No
 _running: set[int] = set()
 
 
+def _dedupe_by_id(rows: list[dict]) -> list[dict]:
+    """Mantém só a 1ª ocorrência de cada Id (a paginação pode repetir)."""
+    seen: set = set()
+    out: list[dict] = []
+    for r in rows:
+        rid = r.get("Id")
+        if rid in seen:
+            continue
+        seen.add(rid)
+        out.append(r)
+    return out
+
+
 def _compute_frequency_days(date_strs: list[str]) -> Optional[int]:
     """Cadência real de compra = mediana dos intervalos entre pedidos.
 
@@ -184,12 +197,14 @@ async def sync_owner(owner_id: int) -> dict:
     _set_state(owner_id, status="running", message="Sincronizando…",
                started_at=_now(), finished_at=None, total=0, synced=0)
     try:
-        contacts_raw = await _fetch_contacts(pl, owner_id)
+        # dedupe por Id: a paginação por $orderby=Name pode repetir registros
+        # na borda das páginas (empate de nome) -> evitaria violar a PK.
+        contacts_raw = _dedupe_by_id(await _fetch_contacts(pl, owner_id))
         _set_state(owner_id, total=len(contacts_raw), synced=0,
                    message=f"{len(contacts_raw)} clientes — buscando pedidos/cotações…")
-        orders_raw = await _fetch_orders(pl, owner_id)
-        quotes_raw = await _fetch_quotes(pl, owner_id)
-        deals_raw = await _fetch_deals(pl, owner_id)
+        orders_raw = _dedupe_by_id(await _fetch_orders(pl, owner_id))
+        quotes_raw = _dedupe_by_id(await _fetch_quotes(pl, owner_id))
+        deals_raw = _dedupe_by_id(await _fetch_deals(pl, owner_id))
 
         rows = [_contact_base(c) for c in contacts_raw if c.get("Id")]
         seg_by_contact = {r["id"]: r["segment_name"] for r in rows}
@@ -305,12 +320,26 @@ async def sync_owner(owner_id: int) -> dict:
         return {"ok": False, "error": str(e)}
 
 
+def _delete_existing_ids(s, model, ids: list[int], chunk: int = 500) -> None:
+    """Apaga linhas com esses ids (em lotes) — independe do owner."""
+    for i in range(0, len(ids), chunk):
+        part = ids[i:i + chunk]
+        if part:
+            s.execute(delete(model).where(model.id.in_(part)))
+
+
 def _write_owner(owner_id: int, contacts: list[dict], orders: list[dict],
                  items: list[dict], quotes: list[dict]) -> None:
     """Substitui todos os dados do vendedor em uma transação."""
     with session_scope() as s:
+        # 1) limpa os dados atuais deste vendedor
         for model in (models.OrderItem, models.Order, models.Quote, models.Contact):
             s.execute(delete(model).where(model.owner_id == owner_id))
+        # 2) remove linhas pré-existentes com os MESMOS ids sob outro vendedor
+        #    (cliente/pedido que mudou de carteira) — evita violar a PK global
+        _delete_existing_ids(s, models.Contact, [c["id"] for c in contacts])
+        _delete_existing_ids(s, models.Order, [o["id"] for o in orders])
+        _delete_existing_ids(s, models.Quote, [q["id"] for q in quotes])
         s.bulk_insert_mappings(models.Contact, contacts)
         if orders:
             s.bulk_insert_mappings(models.Order, orders)
