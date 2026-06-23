@@ -143,6 +143,11 @@ export const api = {
   opportunities: (ownerId: number | null) =>
     req<Opportunities>(`/api/opportunities?${ownerQS(ownerId)}`),
   adminOverview: () => req<AdminOverview>("/api/admin/overview"),
+  dismissAlert: (contactId: number, kind: string, ownerId: number | null) =>
+    req<{ ok: boolean; dismissed_on: string }>(
+      `/api/alerts/dismiss?${ownerQS(ownerId)}`,
+      { method: "POST", body: JSON.stringify({ contact_id: contactId, kind }) }
+    ),
 };
 
 export { ApiError };

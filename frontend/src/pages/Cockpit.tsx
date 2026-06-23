@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useOwner } from "../owner";
-import type { Cockpit as CockpitData } from "../types";
+import type { Alert, Cockpit as CockpitData } from "../types";
 import { money, moneyShort, num } from "../lib/format";
 import { EXPLAIN } from "../lib/explain";
 import Kpi from "../components/Kpi";
@@ -29,6 +29,24 @@ export default function Cockpit() {
       .catch((e) => setErr(e.message))
       .finally(() => setLoading(false));
   }, [ownerId]);
+
+  async function dismiss(a: Alert) {
+    // remove da tela na hora; se falhar, recarrega
+    setData((d) =>
+      d
+        ? {
+            ...d,
+            alerts: d.alerts.filter((x) => !(x.contact_id === a.contact_id && x.kind === a.kind)),
+            kpis: { ...d.kpis, alerts: Math.max(0, d.kpis.alerts - 1) },
+          }
+        : d
+    );
+    try {
+      await api.dismissAlert(a.contact_id, a.kind, ownerId);
+    } catch {
+      if (ownerId) api.cockpit(ownerId, 25).then(setData).catch(() => {});
+    }
+  }
 
   if (isAdmin && !ownerId)
     return (
@@ -109,6 +127,7 @@ export default function Cockpit() {
                 key={`${a.contact_id}-${a.kind}-${i}`}
                 a={a}
                 onClick={() => setSelected(a.contact_id)}
+                onDismiss={() => dismiss(a)}
               />
             ))}
           </div>

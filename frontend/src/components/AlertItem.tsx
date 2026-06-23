@@ -7,7 +7,15 @@ const KIND_META: Record<string, { icon: string; label: string }> = {
   inactive: { icon: "💤", label: "Inativo" },
 };
 
-export default function AlertItem({ a, onClick }: { a: Alert; onClick?: () => void }) {
+export default function AlertItem({
+  a,
+  onClick,
+  onDismiss,
+}: {
+  a: Alert;
+  onClick?: () => void;
+  onDismiss?: () => void;
+}) {
   const meta = KIND_META[a.kind] || { icon: "•", label: a.kind };
   const high = a.severity === "high";
   return (
@@ -38,6 +46,18 @@ export default function AlertItem({ a, onClick }: { a: Alert; onClick?: () => vo
         <div className="mt-0.5 text-sm text-slate-600">{a.title}</div>
         {a.detail && <div className="text-xs text-slate-400">{a.detail}</div>}
       </div>
+      {onDismiss && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDismiss();
+          }}
+          title="OK por hoje (volta amanhã se continuar)"
+          className="shrink-0 self-center rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-emerald-50 hover:text-emerald-700"
+        >
+          ✓ OK
+        </button>
+      )}
     </div>
   );
 }

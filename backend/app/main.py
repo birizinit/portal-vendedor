@@ -444,6 +444,72 @@ async def create_contact_deal(contact_id: int, body: DealIn,
     return {"ok": True, "id": created.get("Id"), "stage_id": stage_id}
 
 
+def _today_sp() -> str:
+    """Data de hoje em America/Sao_Paulo (YYYY-MM-DD)."""
+    from zoneinfo import ZoneInfo
+    import datetime as _dt
+    return _dt.datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d")
+
+
+def _dismissed_today(db: Session, oid: int) -> set[tuple[int, str]]:
+    today = _today_sp()
+    rows = db.execute(
+        select(models.AlertDismissal.contact_id, models.AlertDismissal.kind)
+        .where(models.AlertDismissal.owner_id == oid,
+               models.AlertDismissal.dismissed_on == today)).all()
+    return {(r[0], r[1]) for r in rows}
+
+
+def _apply_dismissals(db: Session, oid: int, res: dict) -> dict:
+    """Remove dos alertas o que o vendedor já deu 'OK' hoje."""
+    dism = _dismissed_today(db, oid)
+    if not dism:
+        return res
+    res["alerts"] = [a for a in res["alerts"]
+                     if (a["contact_id"], a["kind"]) not in dism]
+    res["count"] = len(res["alerts"])
+    by_kind: dict[str, int] = {}
+    for a in res["alerts"]:
+        by_kind[a["kind"]] = by_kind.get(a["kind"], 0) + 1
+    res["by_kind"] = by_kind
+    return res
+
+
+class DismissIn(BaseModel):
+    contact_id: int
+    kind: str
+
+
+@app.post("/api/alerts/dismiss")
+def dismiss_alert(body: DismissIn, owner_id: Optional[int] = None,
+                  user: models.Seller = Depends(current_user),
+                  db: Session = Depends(get_session)) -> dict:
+    """Dá 'OK' num alerta — silencia só hoje; volta amanhã se persistir."""
+    oid = resolve_owner_id(user, owner_id)
+    today = _today_sp()
+    row = db.query(models.AlertDismissal).filter_by(
+        owner_id=oid, contact_id=body.contact_id, kind=body.kind).first()
+    if row:
+        row.dismissed_on = today
+    else:
+        db.add(models.AlertDismissal(owner_id=oid, contact_id=body.contact_id,
+                                     kind=body.kind, dismissed_on=today))
+    db.commit()
+    return {"ok": True, "dismissed_on": today}
+
+
+@app.post("/api/alerts/restore")
+def restore_alert(body: DismissIn, owner_id: Optional[int] = None,
+                  user: models.Seller = Depends(current_user),
+                  db: Session = Depends(get_session)) -> dict:
+    """Desfaz o 'OK' (caso tenha clicado sem querer)."""
+    oid = resolve_owner_id(user, owner_id)
+    db.query(models.AlertDismissal).filter_by(
+        owner_id=oid, contact_id=body.contact_id, kind=body.kind).delete()
+    db.commit()
+    return {"ok": True}
+
+
 @app.get("/api/alerts")
 def alerts(owner_id: Optional[int] = None,
            user: models.Seller = Depends(current_user),
@@ -451,7 +517,7 @@ def alerts(owner_id: Optional[int] = None,
     oid = resolve_owner_id(user, owner_id)
     rows = db.scalars(select(models.Contact).where(
         models.Contact.owner_id == oid)).all()
-    return build_alerts(rows)
+    return _apply_dismissals(db, oid, build_alerts(rows))
 
 
 @app.get("/api/cockpit")
@@ -482,7 +548,7 @@ def cockpit(owner_id: Optional[int] = None, top: int = Query(20, le=100),
     overdue_n = sum(1 for c in all_rows if overdue(c))
     # dinheiro na mesa estimado = cotações abertas + recompra esperada de quem estourou frequência
     queue = sorted(all_rows, key=lambda c: c.priority_score, reverse=True)[:top]
-    al = build_alerts(all_rows)
+    al = _apply_dismissals(db, oid, build_alerts(all_rows))
 
     st = db.get(models.SyncState, oid)
     return {

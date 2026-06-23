@@ -124,3 +124,19 @@ class SyncState(Base):
     synced: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AlertDismissal(Base):
+    """'OK' do vendedor num alerta — silencia só pelo dia (volta amanhã se
+    a situação no Ploomes continuar)."""
+    __tablename__ = "alert_dismissals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[int] = mapped_column(Integer, index=True)
+    contact_id: Mapped[int] = mapped_column(Integer, index=True)
+    kind: Mapped[str] = mapped_column(String(30), default="")
+    dismissed_on: Mapped[str] = mapped_column(String(10), default="")  # YYYY-MM-DD (America/Sao_Paulo)
+
+    __table_args__ = (
+        Index("ix_dismissal_unique", "owner_id", "contact_id", "kind", unique=True),
+    )
