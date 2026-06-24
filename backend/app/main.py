@@ -12,9 +12,9 @@ from typing import Optional
 
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
@@ -32,6 +32,9 @@ from app.security import (
     seed_admin, verify_password,
 )
 from app.sync import portfolio as sync
+from app.util import only_digits
+from app.whatsapp import client as neppo
+from app.whatsapp import store as wa_store
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -42,10 +45,12 @@ log = logging.getLogger("portal")
 async def lifespan(app: FastAPI):
     init_db()
     seed_admin()
-    log.info("Pronto. Ploomes configurado: %s | admin: %s",
-             settings.ploomes_configured, settings.portal_admin_email)
+    log.info("Pronto. Ploomes: %s | Neppo/WhatsApp: %s | admin: %s",
+             settings.ploomes_configured, settings.neppo_enabled,
+             settings.portal_admin_email)
     yield
     await close_ploomes()
+    await neppo.close_neppo()
 
 
 app = FastAPI(title="Portal de Inteligência de Carteira", version="0.2.0",
@@ -442,6 +447,103 @@ async def create_contact_deal(contact_id: int, body: DealIn,
         log.exception("falha ao criar deal contato %s", contact_id)
         raise HTTPException(502, f"Não foi possível criar o negócio no Ploomes: {e}")
     return {"ok": True, "id": created.get("Id"), "stage_id": stage_id}
+
+
+# ===========================================================================
+# WHATSAPP (Neppo) — conversa na ficha + envio assistido dentro da janela 24h
+# ===========================================================================
+def _wa_dto(m: models.WhatsappMessage) -> dict:
+    return {
+        "id": m.id, "direction": m.direction, "text": m.text,
+        "name": m.name, "sent_by": m.sent_by,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+    }
+
+
+class WhatsappSendIn(BaseModel):
+    text: str
+
+
+@app.get("/api/contact/{contact_id}/whatsapp")
+def contact_whatsapp(contact_id: int, owner_id: Optional[int] = None,
+                     user: models.Seller = Depends(current_user),
+                     db: Session = Depends(get_session)) -> dict:
+    """Conversa de WhatsApp do cliente (do espelho local) + estado da janela 24h."""
+    oid = resolve_owner_id(user, owner_id)
+    c = _require_owned_contact(db, contact_id, oid)
+    tail = c.phone_tail or only_digits(c.phone)[-8:]
+    msgs = wa_store.thread_for_contact(db, c)
+    window = wa_store.session_window(wa_store.last_inbound_at(db, tail))
+    awaiting = bool(msgs) and msgs[-1].direction == "in"
+    return {
+        "enabled": settings.neppo_enabled,
+        "phone": c.phone,
+        "awaiting_reply": awaiting,
+        "window": window,
+        "messages": [_wa_dto(m) for m in msgs],
+    }
+
+
+@app.post("/api/contact/{contact_id}/whatsapp/send", status_code=201)
+async def send_whatsapp(contact_id: int, body: WhatsappSendIn,
+                        owner_id: Optional[int] = None,
+                        user: models.Seller = Depends(current_user),
+                        db: Session = Depends(get_session)) -> dict:
+    """Envia uma mensagem de WhatsApp pelo Neppo e registra no espelho local."""
+    oid = resolve_owner_id(user, owner_id)
+    c = _require_owned_contact(db, contact_id, oid)
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(422, "Escreva a mensagem")
+    if not c.phone or len(only_digits(c.phone)) < 10:
+        raise HTTPException(422, "Cliente sem telefone válido para WhatsApp")
+
+    cli = neppo.get_neppo()
+    if cli is None:
+        raise HTTPException(503, "Integração Neppo/WhatsApp não configurada")
+    try:
+        await cli.send_message(c.phone, text)
+    except Exception as e:  # noqa: BLE001
+        log.exception("falha ao enviar WhatsApp contato %s", contact_id)
+        raise HTTPException(502, f"Não foi possível enviar pelo Neppo: {e}")
+
+    wa_store.save_message(db, phone=c.phone, direction="out", text=text,
+                          name=c.name, sent_by=user.name)
+    return {"ok": True, "sent_by": user.name}
+
+
+# ===========================================================================
+# WEBHOOK NEPPO — ingere mensagens recebidas no espelho local (fonte da verdade)
+# ===========================================================================
+def _valid_webhook(request: Request) -> bool:
+    key_cfg = settings.webhook_validation_key
+    if not key_cfg:
+        log.warning("webhook Neppo sem WEBHOOK_VALIDATION_KEY — liberado (defina em produção)")
+        return True
+    got = request.query_params.get("key") or request.headers.get("X-Webhook-Key", "")
+    return got == key_cfg
+
+
+@app.get("/api/webhooks/neppo")
+def neppo_webhook_validate(request: Request):
+    """Handshake de validação (alguns provedores ecoam hub.challenge)."""
+    challenge = request.query_params.get("hub.challenge")
+    return Response(content=challenge or "ok", media_type="text/plain")
+
+
+@app.post("/api/webhooks/neppo")
+async def neppo_webhook(request: Request,
+                        db: Session = Depends(get_session)) -> dict:
+    if not _valid_webhook(request):
+        raise HTTPException(403, "webhook não autorizado")
+    payload = await request.json()
+    msg = neppo.parse_webhook(payload)
+    if msg is None:
+        return {"ignored": True}
+    wa_store.save_message(db, phone=msg["phone"], direction="in",
+                          text=msg["text"], name=msg.get("name", ""),
+                          neppo_id=msg.get("id"))
+    return {"ok": True}
 
 
 def _today_sp() -> str:

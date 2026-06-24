@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useOwner } from "../owner";
-import type { ContactDetail, Deal, Interaction } from "../types";
+import type { ContactDetail, Deal, Interaction, WhatsappThread } from "../types";
 import { fmtDate, money, phoneLink } from "../lib/format";
 import { EXPLAIN } from "../lib/explain";
 import Hint from "./Hint";
@@ -52,6 +52,11 @@ export default function Ficha({
   const [savingD, setSavingD] = useState(false);
   const [toast, setToast] = useState("");
 
+  // conversa de WhatsApp (Neppo) — espelho local
+  const [wa, setWa] = useState<WhatsappThread | null>(null);
+  const [waText, setWaText] = useState("");
+  const [waSending, setWaSending] = useState(false);
+
   useEffect(() => {
     setLoading(true);
     api
@@ -74,7 +79,25 @@ export default function Ficha({
   useEffect(() => {
     api.interactions(contactId, ownerId).then((r) => setInteractions(r.items)).catch(() => {});
     api.contactDeals(contactId, ownerId).then((r) => setDeals(r.items)).catch(() => {});
+    api.whatsapp(contactId, ownerId).then(setWa).catch(() => {});
   }, [contactId, ownerId]);
+
+  async function sendWhatsapp(text: string, fromCompose = false) {
+    const msg = text.trim();
+    if (!msg || waSending) return;
+    setWaSending(true);
+    try {
+      await api.sendWhatsapp(contactId, ownerId, msg);
+      if (fromCompose) setWaText("");
+      flash("Mensagem enviada no WhatsApp ✓");
+      const r = await api.whatsapp(contactId, ownerId);
+      setWa(r);
+    } catch (e: any) {
+      flash(e.message || "Erro ao enviar");
+    } finally {
+      setWaSending(false);
+    }
+  }
 
   async function saveInteraction() {
     if (!iText.trim() || savingI) return;
@@ -188,6 +211,19 @@ export default function Ficha({
                     </div>
                   ))}
                 </div>
+              </Section>
+            )}
+
+            {/* conversa WhatsApp (Neppo) */}
+            {wa?.enabled && (
+              <Section title="💬 Conversa WhatsApp">
+                <WhatsappPanel
+                  thread={wa}
+                  text={waText}
+                  onText={setWaText}
+                  sending={waSending}
+                  onSend={sendWhatsapp}
+                />
               </Section>
             )}
 
@@ -337,7 +373,16 @@ export default function Ficha({
                       {m.title}
                     </div>
                     <div className="whitespace-pre-wrap text-sm text-slate-700">{m.text}</div>
-                    <div className="mt-2 flex gap-2">
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {wa?.enabled && c.phone && (
+                        <button
+                          onClick={() => sendWhatsapp(m.text)}
+                          disabled={waSending}
+                          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                        >
+                          {waSending ? "Enviando…" : "Enviar pelo portal"}
+                        </button>
+                      )}
                       {c.phone && (
                         <a
                           href={phoneLink(c.phone, m.text)}
@@ -345,7 +390,7 @@ export default function Ficha({
                           rel="noreferrer"
                           className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700"
                         >
-                          Enviar no WhatsApp
+                          {wa?.enabled ? "Abrir no WhatsApp" : "Enviar no WhatsApp"}
                         </a>
                       )}
                       <button
@@ -449,6 +494,105 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div>
       <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">{title}</h3>
       {children}
+    </div>
+  );
+}
+
+function fmtDateTime(s: string | null): string {
+  if (!s) return "";
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function WhatsappPanel({
+  thread,
+  text,
+  onText,
+  sending,
+  onSend,
+}: {
+  thread: WhatsappThread;
+  text: string;
+  onText: (s: string) => void;
+  sending: boolean;
+  onSend: (text: string, fromCompose: boolean) => void;
+}) {
+  const { messages, window: win, awaiting_reply } = thread;
+  const noInbound = !win.last_inbound_at;
+
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+      {awaiting_reply && (
+        <div className="rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700">
+          ⏳ O cliente está aguardando sua resposta
+        </div>
+      )}
+
+      {/* histórico */}
+      <div className="max-h-72 space-y-1.5 overflow-auto rounded-lg bg-slate-50 p-2">
+        {messages.length === 0 ? (
+          <div className="py-6 text-center text-sm text-slate-400">
+            Nenhuma mensagem ainda.
+          </div>
+        ) : (
+          messages.map((m) => (
+            <div
+              key={m.id}
+              className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}
+            >
+              <div
+                className={`max-w-[82%] rounded-2xl px-3 py-2 text-sm ${
+                  m.direction === "out"
+                    ? "bg-brand-600 text-white"
+                    : "border border-slate-200 bg-white text-slate-700"
+                }`}
+              >
+                <div className="whitespace-pre-wrap">{m.text}</div>
+                <div
+                  className={`mt-1 text-[10px] ${
+                    m.direction === "out" ? "text-brand-100" : "text-slate-400"
+                  }`}
+                >
+                  {m.direction === "out" && m.sent_by ? `${m.sent_by} · ` : ""}
+                  {fmtDateTime(m.created_at)}
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* estado da janela de 24h */}
+      {noInbound ? (
+        <div className="text-xs text-slate-400">
+          Sem mensagem recebida do cliente ainda — ele precisa iniciar a conversa para abrir a janela de 24h.
+        </div>
+      ) : win.open ? (
+        <div className="text-xs font-medium text-emerald-600">
+          🟢 Janela aberta · ~{win.hours_left}h para responder com texto livre.
+        </div>
+      ) : (
+        <div className="text-xs font-medium text-amber-600">
+          🟠 Fora da janela de 24h — envios proativos podem não ser entregues até o cliente responder.
+        </div>
+      )}
+
+      {/* compose */}
+      <textarea
+        value={text}
+        onChange={(e) => onText(e.target.value)}
+        placeholder="Escreva uma mensagem…"
+        rows={2}
+        className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-600"
+      />
+      <button
+        onClick={() => onSend(text, true)}
+        disabled={sending || !text.trim()}
+        className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+      >
+        {sending ? "Enviando…" : "Enviar no WhatsApp"}
+      </button>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import type {
   Reactivation,
   Segment,
   User,
+  WhatsappThread,
 } from "./types";
 
 const TOKEN_KEY = "portal_token";
@@ -108,6 +109,14 @@ export const api = {
     req<{ ok: boolean; id: number; registered_by: string; kind: string }>(
       `/api/contact/${id}/interactions?${ownerQS(ownerId)}`,
       { method: "POST", body: JSON.stringify(body) }
+    ),
+  // --- WhatsApp (Neppo) ---
+  whatsapp: (id: number, ownerId: number | null) =>
+    req<WhatsappThread>(`/api/contact/${id}/whatsapp?${ownerQS(ownerId)}`),
+  sendWhatsapp: (id: number, ownerId: number | null, text: string) =>
+    req<{ ok: boolean; sent_by: string }>(
+      `/api/contact/${id}/whatsapp/send?${ownerQS(ownerId)}`,
+      { method: "POST", body: JSON.stringify({ text }) }
     ),
   // --- negócios (deals) ---
   contactDeals: (id: number, ownerId: number | null) =>

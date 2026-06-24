@@ -49,9 +49,29 @@ class Settings(BaseSettings):
     intake_pipeline_name: str = "Entradas e Prospecção"  # onde novos deals são criados
     intake_source_id: int = 120001505                    # origem "Portal do Vendedor" (0 = não setar)
 
+    # --- Neppo (WhatsApp) — OAuth2 password grant ---
+    neppo_client_key: str = ""
+    neppo_client_secret: str = ""
+    neppo_username: str = ""
+    neppo_password: str = ""
+    neppo_auth_url: str = "https://api-auth.neppo.com.br/oauth2/token"
+    neppo_base_url: str = "https://api.neppo.com.br"
+    neppo_group_name: str = "Atendimento"
+    neppo_group_conf_id: int = 1
+    neppo_user_id: int = 0
+    # janela oficial do WhatsApp: dentro dela o envio de texto livre é liberado.
+    neppo_session_window_hours: int = 24
+    # protege o webhook de ingestão (?key=... ou header X-Webhook-Key)
+    webhook_validation_key: str = ""
+
     @property
     def ploomes_configured(self) -> bool:
         return bool(self.ploomes_api_key.strip())
+
+    @property
+    def neppo_enabled(self) -> bool:
+        return all((self.neppo_client_key, self.neppo_client_secret,
+                    self.neppo_username, self.neppo_password))
 
 
 @lru_cache

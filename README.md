@@ -46,9 +46,26 @@ Acesse **http://localhost:5173**.
 - [x] Fase 4 — Inativos & Reativação (régua de risco, potencial de recuperação)
 - [x] Fase 5 — Oportunidades / Cross-sell por ramo (campeões por ramo + sugestões)
 - [x] Fase 6 — Admin (visão do todo, dinheiro na mesa, ranking de carteiras)
+- [x] Fase 7 — WhatsApp (Neppo) na ficha: conversa do cliente + envio assistido
+  dentro da janela de 24h, espelho local alimentado por webhook
 
 **v1 (read-only) completa.** Próximo marco sugerido: v2 com escrita no Ploomes
 (lançar cotações/pedidos com preview/confirmação).
+
+## WhatsApp (Neppo)
+
+A ficha do cliente mostra a **conversa de WhatsApp** e permite **responder pelo
+portal** (sem trocar de aba). Arquitetura saudável: a Neppo empurra cada mensagem
+via **webhook** para um **espelho local** (`whatsapp_messages`, idempotente por
+`neppo_id`) — a tela sempre lê do espelho, nunca varre a API ao vivo. O join com o
+cliente é por `phone_tail` (últimos 8 dígitos).
+
+- **Ativar:** preencha as variáveis `NEPPO_*` no `.env` (ver `.env.example`).
+  Sem elas, a integração fica desligada e a ficha mantém o link `wa.me`.
+- **Webhook:** aponte o Neppo para `POST /api/webhooks/neppo` e proteja com
+  `WEBHOOK_VALIDATION_KEY` (enviada em `?key=` ou header `X-Webhook-Key`).
+- **Janela de 24h:** dentro da janela o envio de texto livre é liberado; fora
+  dela a UI avisa que envios proativos podem não ser entregues.
 
 ## Deploy (GitHub + Railway)
 

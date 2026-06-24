@@ -126,6 +126,31 @@ class SyncState(Base):
     finished_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class WhatsappMessage(Base):
+    """Espelho local das mensagens de WhatsApp (Neppo).
+
+    Append-only e idempotente por `neppo_id` (webhook reentregue não duplica).
+    O join com o cliente é por `phone_tail` (últimos 8 dígitos) — mesma chave
+    canônica usada em Contact.phone_tail. A tela sempre lê daqui, nunca varre
+    a API da Neppo ao vivo."""
+    __tablename__ = "whatsapp_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    neppo_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True, index=True, nullable=True)
+    phone: Mapped[str] = mapped_column(String(20), default="")
+    phone_tail: Mapped[str] = mapped_column(String(12), default="", index=True)
+    direction: Mapped[str] = mapped_column(String(4), default="in")  # in | out
+    text: Mapped[str] = mapped_column(Text, default="")
+    name: Mapped[str] = mapped_column(String(160), default="")
+    sent_by: Mapped[str] = mapped_column(String(160), default="")  # vendedor que enviou (out)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, index=True)
+
+    __table_args__ = (
+        Index("ix_wa_tail_created", "phone_tail", "created_at"),
+    )
+
+
 class AlertDismissal(Base):
     """'OK' do vendedor num alerta — silencia só pelo dia (volta amanhã se
     a situação no Ploomes continuar)."""

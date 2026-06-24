@@ -117,6 +117,30 @@ export interface Segment {
   count: number;
 }
 
+// ---- WhatsApp (Neppo) ----
+export interface WhatsappMsg {
+  id: number;
+  direction: "in" | "out";
+  text: string;
+  name: string;
+  sent_by: string;
+  created_at: string | null;
+}
+
+export interface WhatsappWindow {
+  open: boolean;
+  last_inbound_at: string | null;
+  hours_left: number;
+}
+
+export interface WhatsappThread {
+  enabled: boolean;
+  phone: string;
+  awaiting_reply: boolean;
+  window: WhatsappWindow;
+  messages: WhatsappMsg[];
+}
+
 export interface Interaction {
   id: number;
   date: string;
